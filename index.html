@@ -8,7 +8,7 @@
   <meta name="theme-color" content="#D4A574">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="#D4A574">
-  <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏠</text></svg>">
+  <link rel="apple-touch-icon" href="icon-192.png">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     /* ===== RESET & BASE ===== */
@@ -179,6 +179,21 @@
       border-radius: 8px; transition: all 0.2s;
     }
     .btn-logout:hover { background: rgba(200,100,100,0.08); color: #C86464; }
+
+    /* ===== NOTIFICATION BANNER ===== */
+    .notification-banner {
+      padding: 10px 14px; background: rgba(212,165,116,0.15);
+      border-bottom: 1px solid rgba(168,144,120,0.1);
+      display: flex; align-items: center; gap: 10px; font-size: 13px;
+    }
+    .notification-banner button {
+      padding: 6px 12px; border-radius: 8px; border: none;
+      background: linear-gradient(135deg, #D4A574, #C4956A);
+      color: white; font-size: 12px; font-weight: 600; cursor: pointer;
+    }
+    .notification-banner .dismiss {
+      background: transparent; color: #A08B78; margin-left: auto;
+    }
 
     /* ===== CHAT AREA ===== */
     #chat-area {
@@ -377,6 +392,13 @@
         <div class="sidebar-meta" id="sidebar-meta"></div>
       </div>
     </div>
+    <!-- Notification prompt banner -->
+    <div id="notification-banner" class="notification-banner hidden">
+      <span>🔔</span>
+      <span>Включите уведомления</span>
+      <button onclick="requestNotificationPermission()">Включить</button>
+      <button class="dismiss" onclick="dismissNotificationBanner()">✕</button>
+    </div>
     <div id="conv-list"></div>
     <div class="sidebar-footer" id="sidebar-footer"></div>
   </div>
@@ -403,8 +425,12 @@
 // =============================================
 // ⚙️ CONFIGURATION — ЗАМЕНИТЕ НА СВОИ ДАННЫЕ
 // =============================================
-const SUPABASE_URL = 'https://elrmeqivmjtzqkqfyigv.supabase.co';
+const SUPABASE_URL = 'https://elrmeqivmjtzqkqfyigy.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVscm1lcWl2bWp0enFrcWZ5aWd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEwMDM3OTIsImV4cCI6MjA4NjU3OTc5Mn0.SZqK8n-yuNR6rsSdQuW2-whGdi9njgnknJpn84Kfa7Q';
+
+// 🔔 VAPID Public Key for Push Notifications
+// Generate with: npx web-push generate-vapid-keys
+const VAPID_PUBLIC_KEY = 'BLyAuZAxQJY4nSD0YRm3LB66TWuhTWmTlO4qV4AxIfy2AXSFnUMdZXFXZOly2U11hoLZbRL2HmAbnNq5BpRyN8E';
 
 // =============================================
 // 🗃️ STATE
@@ -418,6 +444,7 @@ let state = {
   activeConv: null,     // current conversation id
   messages: [],         // messages for active conversation
   channel: null,        // realtime subscription
+  pushSubscription: null, // push subscription
 };
 
 const EMOJIS = ['😊','😎','🤗','😄','🥰','🤓','👩','👨','👧','🧑','👵','👴','👶','🧔','💃','🕺'];
@@ -432,6 +459,9 @@ let pendingPhoto = null;
 async function init() {
   const { createClient } = supabase;
   sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  // Register service worker for push notifications
+  await registerServiceWorker();
 
   // Check current session
   const { data: { session } } = await sb.auth.getSession();
@@ -453,6 +483,118 @@ async function init() {
       showScreen('login');
     }
   });
+}
+
+// =============================================
+// 🔔 PUSH NOTIFICATIONS
+// =============================================
+async function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) {
+    console.log('Service Worker not supported');
+    return;
+  }
+
+  try {
+    const registration = await navigator.serviceWorker.register('/sw.js');
+    console.log('Service Worker registered:', registration.scope);
+  } catch (error) {
+    console.error('Service Worker registration failed:', error);
+  }
+}
+
+function showNotificationBanner() {
+  if (!('Notification' in window) || !('serviceWorker' in navigator)) return;
+  if (Notification.permission === 'granted') return;
+  if (Notification.permission === 'denied') return;
+  if (localStorage.getItem('notification-dismissed')) return;
+
+  document.getElementById('notification-banner').classList.remove('hidden');
+}
+
+function dismissNotificationBanner() {
+  document.getElementById('notification-banner').classList.add('hidden');
+  localStorage.setItem('notification-dismissed', 'true');
+}
+
+async function requestNotificationPermission() {
+  try {
+    const permission = await Notification.requestPermission();
+    
+    if (permission === 'granted') {
+      await subscribeToPush();
+      document.getElementById('notification-banner').classList.add('hidden');
+    } else {
+      console.log('Notification permission denied');
+      dismissNotificationBanner();
+    }
+  } catch (error) {
+    console.error('Error requesting notification permission:', error);
+  }
+}
+
+async function subscribeToPush() {
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    
+    // Check for existing subscription
+    let subscription = await registration.pushManager.getSubscription();
+    
+    if (!subscription) {
+      // Create new subscription
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+      });
+    }
+
+    state.pushSubscription = subscription;
+
+    // Save subscription to Supabase
+    await savePushSubscription(subscription);
+    
+    console.log('Push subscription successful');
+  } catch (error) {
+    console.error('Push subscription failed:', error);
+  }
+}
+
+async function savePushSubscription(subscription) {
+  const subscriptionJson = subscription.toJSON();
+  
+  const { error } = await sb.from('push_subscriptions').upsert({
+    profile_id: state.user.id,
+    endpoint: subscriptionJson.endpoint,
+    p256dh: subscriptionJson.keys.p256dh,
+    auth: subscriptionJson.keys.auth,
+  }, {
+    onConflict: 'profile_id,endpoint'
+  });
+
+  if (error) {
+    console.error('Error saving push subscription:', error);
+  }
+}
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding)
+    .replace(/-/g, '+')
+    .replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+// Auto-subscribe if permission already granted
+async function checkExistingPermission() {
+  if (Notification.permission === 'granted') {
+    await subscribeToPush();
+  } else if (Notification.permission === 'default') {
+    showNotificationBanner();
+  }
 }
 
 // =============================================
@@ -571,6 +713,9 @@ async function enterMessenger() {
   await loadAllProfiles();
   await loadConversations();
   renderSidebar();
+  
+  // Check notification permission after entering messenger
+  await checkExistingPermission();
 }
 
 async function loadAllProfiles() {
