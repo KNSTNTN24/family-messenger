@@ -825,12 +825,12 @@ async function loadMessages(convId) {
 }
 
 function subscribeToMessages(convId) {
-  // Remove old subscription
   if (state.channel) {
     sb.removeChannel(state.channel);
+    state.channel = null;
   }
 
-  state.channel = sb.channel(`conv-${convId}`)
+  const channel = sb.channel(`conv-${convId}`)
     .on('postgres_changes', {
       event: 'INSERT',
       schema: 'public',
@@ -847,15 +847,19 @@ function subscribeToMessages(convId) {
     })
     .subscribe((status) => {
       console.log('Realtime status:', status);
-      if (status === 'CHANNEL_ERROR') {
-        // Reconnect after error
-        setTimeout(() => {
-          if (state.activeConv === convId) {
-            subscribeToMessages(convId);
-          }
-        }, 2000);
-      }
     });
+
+  state.channel = channel;
+}
+
+async function reconnect() {
+  console.log('Reconnecting...');
+  if (state.activeConv) {
+    await loadMessages(state.activeConv);
+    renderChatArea();
+    subscribeToMessages(state.activeConv);
+    scrollToBottom();
+  }
 }
 
 async function sendMessage() {
@@ -1221,40 +1225,30 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-// =============================================
-// 🏁 START
-// =============================================
-  // Reconnect when page becomes visible
-document.addEventListener('visibilitychange', async () => {
-  if (document.visibilityState === 'visible' && state.user) {
-    console.log('Page visible, reconnecting...');
-    // Reload messages for active conversation
-    if (state.activeConv) {
-      await loadMessages(state.activeConv);
-      renderChatArea();
-      subscribeToMessages(state.activeConv);
-      scrollToBottom();
-    }
+// Reconnect when page becomes visible
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && state.user && state.activeConv) {
+    reconnect();
   }
 });
 
-// Periodic connection check
-setInterval(async () => {
-  if (state.activeConv && document.visibilityState === 'visible') {
-    const { data } = await sb.from('messages')
-      .select('id')
-      .eq('conversation_id', state.activeConv)
-      .order('created_at', { ascending: false })
-      .limit(1);
-    
-    if (data?.[0] && !state.messages.find(m => m.id === data[0].id)) {
-      console.log('New message detected, reloading...');
-      await loadMessages(state.activeConv);
-      renderChatArea();
-      scrollToBottom();
-    }
+// Reconnect on focus
+window.addEventListener('focus', () => {
+  if (state.user && state.activeConv) {
+    reconnect();
   }
-}, 30000); // Check every 30 seconds
+});
+
+// Reconnect on online
+window.addEventListener('online', () => {
+  if (state.user && state.activeConv) {
+    reconnect();
+  }
+});
+
+// =============================================
+// 🏁 START
+// =============================================
 init();
 </script>
 </body>
