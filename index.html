@@ -218,6 +218,17 @@
     .chat-header-status { font-size: 12px; color: #8BC49E; display: flex; align-items: center; gap: 4px; }
     .chat-header-members { font-size: 12px; color: #A08B78; }
 
+    /* Refresh button */
+    .btn-refresh {
+      width: 36px; height: 36px; border-radius: 10px; border: none;
+      background: rgba(212,165,116,0.1); cursor: pointer; font-size: 16px;
+      display: flex; align-items: center; justify-content: center; transition: all 0.2s;
+      margin-left: auto;
+    }
+    .btn-refresh:hover { background: rgba(212,165,116,0.2); }
+    .btn-refresh:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-refresh.spinning { animation: spin 0.6s linear infinite; }
+
     /* Messages */
     #messages-container {
       flex: 1; overflow-y: auto; padding: 16px; display: flex;
@@ -429,7 +440,6 @@ const SUPABASE_URL = 'https://elrmeqivmjtzqkqfyigv.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVscm1lcWl2bWp0enFrcWZ5aWd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEwMDM3OTIsImV4cCI6MjA4NjU3OTc5Mn0.SZqK8n-yuNR6rsSdQuW2-whGdi9njgnknJpn84Kfa7Q';
 
 // 🔔 VAPID Public Key for Push Notifications
-// Generate with: npx web-push generate-vapid-keys
 const VAPID_PUBLIC_KEY = 'BLyAuZAxQJY4nSD0YRm3LB66TWuhTWmTlO4qV4AxIfy2AXSFnUMdZXFXZOly2U11hoLZbRL2HmAbnNq5BpRyN8E';
 
 // =============================================
@@ -437,14 +447,14 @@ const VAPID_PUBLIC_KEY = 'BLyAuZAxQJY4nSD0YRm3LB66TWuhTWmTlO4qV4AxIfy2AXSFnUMdZX
 // =============================================
 let sb; // supabase client
 let state = {
-  user: null,           // auth user
-  profile: null,        // user's profile
-  profiles: {},         // all profiles by id
-  conversations: [],    // conversation list
-  activeConv: null,     // current conversation id
-  messages: [],         // messages for active conversation
-  channel: null,        // realtime subscription
-  pushSubscription: null, // push subscription
+  user: null,
+  profile: null,
+  profiles: {},
+  conversations: [],
+  activeConv: null,
+  messages: [],
+  channel: null,
+  pushSubscription: null,
 };
 
 const EMOJIS = ['😊','😎','🤗','😄','🥰','🤓','👩','👨','👧','🧑','👵','👴','👶','🧔','💃','🕺'];
@@ -460,10 +470,8 @@ async function init() {
   const { createClient } = supabase;
   sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-  // Register service worker for push notifications
   await registerServiceWorker();
 
-  // Check current session
   const { data: { session } } = await sb.auth.getSession();
   if (session) {
     state.user = session.user;
@@ -472,7 +480,6 @@ async function init() {
     showScreen('login');
   }
 
-  // Listen for auth changes
   sb.auth.onAuthStateChange(async (event, session) => {
     if (event === 'SIGNED_IN' && session) {
       state.user = session.user;
@@ -489,11 +496,7 @@ async function init() {
 // 🔔 PUSH NOTIFICATIONS
 // =============================================
 async function registerServiceWorker() {
-  if (!('serviceWorker' in navigator)) {
-    console.log('Service Worker not supported');
-    return;
-  }
-
+  if (!('serviceWorker' in navigator)) return;
   try {
     const registration = await navigator.serviceWorker.register('/sw.js');
     console.log('Service Worker registered:', registration.scope);
@@ -507,7 +510,6 @@ function showNotificationBanner() {
   if (Notification.permission === 'granted') return;
   if (Notification.permission === 'denied') return;
   if (localStorage.getItem('notification-dismissed')) return;
-
   document.getElementById('notification-banner').classList.remove('hidden');
 }
 
@@ -519,12 +521,10 @@ function dismissNotificationBanner() {
 async function requestNotificationPermission() {
   try {
     const permission = await Notification.requestPermission();
-    
     if (permission === 'granted') {
       await subscribeToPush();
       document.getElementById('notification-banner').classList.add('hidden');
     } else {
-      console.log('Notification permission denied');
       dismissNotificationBanner();
     }
   } catch (error) {
@@ -535,12 +535,9 @@ async function requestNotificationPermission() {
 async function subscribeToPush() {
   try {
     const registration = await navigator.serviceWorker.ready;
-    
-    // Check for existing subscription
     let subscription = await registration.pushManager.getSubscription();
     
     if (!subscription) {
-      // Create new subscription
       subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
@@ -548,10 +545,7 @@ async function subscribeToPush() {
     }
 
     state.pushSubscription = subscription;
-
-    // Save subscription to Supabase
     await savePushSubscription(subscription);
-    
     console.log('Push subscription successful');
   } catch (error) {
     console.error('Push subscription failed:', error);
@@ -560,26 +554,19 @@ async function subscribeToPush() {
 
 async function savePushSubscription(subscription) {
   const subscriptionJson = subscription.toJSON();
-  
   const { error } = await sb.from('push_subscriptions').upsert({
     profile_id: state.user.id,
     endpoint: subscriptionJson.endpoint,
     p256dh: subscriptionJson.keys.p256dh,
     auth: subscriptionJson.keys.auth,
-  }, {
-    onConflict: 'profile_id,endpoint'
-  });
+  }, { onConflict: 'profile_id,endpoint' });
 
-  if (error) {
-    console.error('Error saving push subscription:', error);
-  }
+  if (error) console.error('Error saving push subscription:', error);
 }
 
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
-  const base64 = (base64String + padding)
-    .replace(/-/g, '+')
-    .replace(/_/g, '/');
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
   const rawData = window.atob(base64);
   const outputArray = new Uint8Array(rawData.length);
   for (let i = 0; i < rawData.length; ++i) {
@@ -588,7 +575,6 @@ function urlBase64ToUint8Array(base64String) {
   return outputArray;
 }
 
-// Auto-subscribe if permission already granted
 async function checkExistingPermission() {
   if (Notification.permission === 'granted') {
     await subscribeToPush();
@@ -713,8 +699,6 @@ async function enterMessenger() {
   await loadAllProfiles();
   await loadConversations();
   renderSidebar();
-  
-  // Check notification permission after entering messenger
   await checkExistingPermission();
 }
 
@@ -728,7 +712,6 @@ async function loadAllProfiles() {
 // 📋 CONVERSATIONS
 // =============================================
 async function loadConversations() {
-  // Get conversations where I'm a member
   const { data: memberships } = await sb.from('conversation_members')
     .select('conversation_id').eq('profile_id', state.user.id);
 
@@ -739,7 +722,6 @@ async function loadConversations() {
   const { data: convs } = await sb.from('conversations')
     .select('*').in('id', convIds).order('created_at');
 
-  // For each conversation, get members and last message
   for (const conv of (convs || [])) {
     const { data: members } = await sb.from('conversation_members')
       .select('profile_id').eq('conversation_id', conv.id);
@@ -751,7 +733,6 @@ async function loadConversations() {
     conv.lastMessage = lastMsg?.[0] || null;
   }
 
-  // Sort: group first, then by last message time
   state.conversations = (convs || []).sort((a, b) => {
     if (a.is_group && !b.is_group) return -1;
     if (!a.is_group && b.is_group) return 1;
@@ -764,12 +745,10 @@ async function loadConversations() {
 async function openConversation(convId) {
   state.activeConv = convId;
 
-  // Update sidebar active state
   document.querySelectorAll('.conv-item').forEach(el => el.classList.remove('active'));
   const activeEl = document.querySelector(`[data-conv="${convId}"]`);
   if (activeEl) activeEl.classList.add('active');
 
-  // Mobile: show chat
   document.getElementById('sidebar').classList.add('chat-open');
   document.getElementById('chat-area').classList.add('chat-open');
 
@@ -785,9 +764,7 @@ function goBack() {
   document.getElementById('chat-area').classList.remove('chat-open');
 }
 
-// Create a DM conversation with another user
 async function openDM(otherUserId) {
-  // Check if DM already exists
   const existing = state.conversations.find(c =>
     !c.is_group && c.members.length === 2 &&
     c.members.includes(state.user.id) && c.members.includes(otherUserId)
@@ -798,7 +775,6 @@ async function openDM(otherUserId) {
     return;
   }
 
-  // Create new DM
   const { data: conv } = await sb.from('conversations').insert({ is_group: false }).select().single();
   if (!conv) return;
 
@@ -830,7 +806,7 @@ function subscribeToMessages(convId) {
     state.channel = null;
   }
 
-  const channel = sb.channel(`conv-${convId}`)
+  state.channel = sb.channel(`conv-${convId}`)
     .on('postgres_changes', {
       event: 'INSERT',
       schema: 'public',
@@ -848,18 +824,29 @@ function subscribeToMessages(convId) {
     .subscribe((status) => {
       console.log('Realtime status:', status);
     });
-
-  state.channel = channel;
 }
 
-async function reconnect() {
-  console.log('Reconnecting...');
-  if (state.activeConv) {
-    await loadMessages(state.activeConv);
-    renderChatArea();
-    subscribeToMessages(state.activeConv);
-    scrollToBottom();
+// 🔄 REFRESH CHAT - кнопка обновления
+async function refreshChat() {
+  if (!state.activeConv) return;
+  
+  const btn = document.querySelector('.btn-refresh');
+  if (btn) {
+    btn.classList.add('spinning');
+    btn.disabled = true;
   }
+  
+  // Отключаем старый канал
+  if (state.channel) {
+    sb.removeChannel(state.channel);
+    state.channel = null;
+  }
+  
+  // Перезагружаем сообщения
+  await loadMessages(state.activeConv);
+  renderChatArea();
+  subscribeToMessages(state.activeConv);
+  scrollToBottom();
 }
 
 async function sendMessage() {
@@ -870,7 +857,6 @@ async function sendMessage() {
 
   let imageUrl = null;
 
-  // Upload photo if pending
   if (pendingPhoto) {
     const file = pendingPhoto;
     const ext = file.name.split('.').pop();
@@ -887,7 +873,6 @@ async function sendMessage() {
     clearPhotoPreview();
   }
 
-  // Send message
   const { error } = await sb.from('messages').insert({
     conversation_id: state.activeConv,
     sender_id: state.user.id,
@@ -920,7 +905,7 @@ function handleFileSelect(event) {
     updateSendButton();
   };
   reader.readAsDataURL(file);
-  event.target.value = ''; // reset
+  event.target.value = '';
 }
 
 function clearPhotoPreview() {
@@ -954,20 +939,16 @@ function renderSidebar() {
   document.getElementById('sidebar-meta').textContent =
     `${profileCount} участник${getPlural(profileCount)} • ${cities.length} ${cities.length === 1 ? 'город' : 'городов'}`;
 
-  // Conversation list
   const list = document.getElementById('conv-list');
   let html = '';
 
-  // Group chats
   const groups = state.conversations.filter(c => c.is_group);
   if (groups.length) {
     html += '<div class="conv-section-title">Семейный чат</div>';
     groups.forEach(c => { html += renderConvItem(c); });
   }
 
-  // DMs
   const dms = state.conversations.filter(c => !c.is_group);
-  // Also show family members who don't have a DM yet
   const otherProfiles = Object.values(state.profiles).filter(p => p.id !== state.user.id);
 
   if (otherProfiles.length) {
@@ -977,7 +958,6 @@ function renderSidebar() {
       if (dm) {
         html += renderConvItem(dm, p);
       } else {
-        // No DM yet, show member with "start chat" option
         html += `
           <div class="conv-item" onclick="openDM('${p.id}')">
             <div class="conv-avatar" style="background: linear-gradient(145deg, ${p.color}, ${p.color}dd)">${p.emoji}</div>
@@ -993,13 +973,11 @@ function renderSidebar() {
 
   list.innerHTML = html;
 
-  // Highlight active
   if (state.activeConv) {
     const el = document.querySelector(`[data-conv="${state.activeConv}"]`);
     if (el) el.classList.add('active');
   }
 
-  // My profile in footer
   const p = state.profile;
   document.getElementById('sidebar-footer').innerHTML = `
     <div class="my-avatar" style="background: linear-gradient(145deg, ${p.color}, ${p.color}dd)">${p.emoji}</div>
@@ -1091,10 +1069,11 @@ function renderChatArea() {
     <div class="chat-header">
       <button class="btn-back" onclick="goBack()">←</button>
       <div class="chat-header-avatar" style="background: linear-gradient(145deg, ${headerColor}, ${headerColor}dd)">${headerEmoji}</div>
-      <div>
+      <div style="flex:1">
         <div class="chat-header-name">${esc(headerName)}</div>
         ${headerStatus}
       </div>
+      <button class="btn-refresh" onclick="refreshChat()" title="Обновить">🔄</button>
     </div>
     <div id="messages-container"></div>
     <div id="photo-preview">
@@ -1109,7 +1088,6 @@ function renderChatArea() {
     </div>
   `;
 
-  // Render existing messages
   const container = document.getElementById('messages-container');
   let lastDate = '';
   state.messages.forEach(msg => {
@@ -1149,9 +1127,7 @@ function appendMessage(msg) {
   const conv = state.conversations.find(c => c.id === state.activeConv);
   const isGroup = conv?.is_group || false;
 
-  // Check if we need a date divider
   const date = formatDate(msg.created_at);
-  const lastMsgEl = container.querySelector('.msg-row:last-of-type');
   const lastDateEl = container.querySelector('.msg-date-divider:last-of-type');
   if (!lastDateEl || lastDateEl.textContent !== date) {
     container.insertAdjacentHTML('beforeend', `<div class="msg-date-divider">${date}</div>`);
@@ -1163,7 +1139,6 @@ function appendMessage(msg) {
 function updateConvLastMessage(convId, msg) {
   const conv = state.conversations.find(c => c.id === convId);
   if (conv) conv.lastMessage = msg;
-  // Re-render sidebar to update preview
   renderSidebar();
 }
 
@@ -1216,33 +1191,11 @@ function getPlural(n) {
   return 'ов';
 }
 
-// Login on Enter key
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
     if (!document.getElementById('login-screen').classList.contains('hidden')) {
       handleLogin();
     }
-  }
-});
-
-// Reconnect when page becomes visible
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && state.user && state.activeConv) {
-    reconnect();
-  }
-});
-
-// Reconnect on focus
-window.addEventListener('focus', () => {
-  if (state.user && state.activeConv) {
-    reconnect();
-  }
-});
-
-// Reconnect on online
-window.addEventListener('online', () => {
-  if (state.user && state.activeConv) {
-    reconnect();
   }
 });
 
