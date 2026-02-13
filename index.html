@@ -838,16 +838,24 @@ function subscribeToMessages(convId) {
       filter: `conversation_id=eq.${convId}`,
     }, (payload) => {
       const newMsg = payload.new;
-      // Avoid duplicates
       if (!state.messages.find(m => m.id === newMsg.id)) {
         state.messages.push(newMsg);
         appendMessage(newMsg);
         scrollToBottom();
-        // Update last message in conversation list
         updateConvLastMessage(convId, newMsg);
       }
     })
-    .subscribe();
+    .subscribe((status) => {
+      console.log('Realtime status:', status);
+      if (status === 'CHANNEL_ERROR') {
+        // Reconnect after error
+        setTimeout(() => {
+          if (state.activeConv === convId) {
+            subscribeToMessages(convId);
+          }
+        }, 2000);
+      }
+    });
 }
 
 async function sendMessage() {
@@ -1216,6 +1224,37 @@ document.addEventListener('keydown', (e) => {
 // =============================================
 // 🏁 START
 // =============================================
+  // Reconnect when page becomes visible
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState === 'visible' && state.user) {
+    console.log('Page visible, reconnecting...');
+    // Reload messages for active conversation
+    if (state.activeConv) {
+      await loadMessages(state.activeConv);
+      renderChatArea();
+      subscribeToMessages(state.activeConv);
+      scrollToBottom();
+    }
+  }
+});
+
+// Periodic connection check
+setInterval(async () => {
+  if (state.activeConv && document.visibilityState === 'visible') {
+    const { data } = await sb.from('messages')
+      .select('id')
+      .eq('conversation_id', state.activeConv)
+      .order('created_at', { ascending: false })
+      .limit(1);
+    
+    if (data?.[0] && !state.messages.find(m => m.id === data[0].id)) {
+      console.log('New message detected, reloading...');
+      await loadMessages(state.activeConv);
+      renderChatArea();
+      scrollToBottom();
+    }
+  }
+}, 30000); // Check every 30 seconds
 init();
 </script>
 </body>
