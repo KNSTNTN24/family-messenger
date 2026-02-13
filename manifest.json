@@ -1,0 +1,16 @@
+{
+  "name": "Наша Семья",
+  "short_name": "Семья",
+  "description": "Семейный мессенджер",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FDF6F0",
+  "theme_color": "#D4A574",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏠</text></svg>",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
