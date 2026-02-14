@@ -748,13 +748,22 @@ async function startCall(receiverId) {
 
 async function joinDailyRoom(roomName) {
   try {
-    state.callObject = DailyIframe.createCallObject({
-      audioSource: true,
-      videoSource: false,
-    });
+    // Request microphone permission first
+    try {
+      await navigator.mediaDevices.getUserMedia({ audio: true });
+      console.log('Microphone permission granted');
+    } catch (micError) {
+      console.error('Microphone permission denied:', micError);
+      alert('Разрешите доступ к микрофону для звонков');
+      endCallUI();
+      return;
+    }
+
+    state.callObject = DailyIframe.createCallObject();
     
     state.callObject.on('joined-meeting', () => {
       console.log('Joined Daily room');
+      state.callObject.setLocalAudio(true);
     });
     
     state.callObject.on('left-meeting', () => {
@@ -763,7 +772,6 @@ async function joinDailyRoom(roomName) {
     
     state.callObject.on('participant-joined', (event) => {
       console.log('Participant joined:', event);
-      // Other person joined - call is active
       if (state.currentCall) {
         startCallTimer();
         renderActiveCallUI();
@@ -772,7 +780,6 @@ async function joinDailyRoom(roomName) {
     
     state.callObject.on('participant-left', (event) => {
       console.log('Participant left:', event);
-      // Other person left - end call
       endCall();
     });
     
@@ -780,10 +787,43 @@ async function joinDailyRoom(roomName) {
       console.error('Daily error:', error);
       endCallUI();
     });
+
+    // Handle incoming audio tracks
+    state.callObject.on('track-started', (event) => {
+      console.log('Track started:', event.track.kind, 'from', event.participant?.user_name || 'unknown');
+      
+      // Play remote audio
+      if (event.track.kind === 'audio' && !event.participant?.local) {
+        const audioEl = document.createElement('audio');
+        audioEl.id = `audio-${event.participant?.session_id || 'remote'}`;
+        audioEl.srcObject = new MediaStream([event.track]);
+        audioEl.autoplay = true;
+        audioEl.playsInline = true;
+        document.body.appendChild(audioEl);
+        
+        audioEl.play().then(() => {
+          console.log('Remote audio playing');
+        }).catch(err => {
+          console.error('Error playing audio:', err);
+        });
+      }
+    });
+
+    state.callObject.on('track-stopped', (event) => {
+      console.log('Track stopped:', event.track.kind);
+      // Remove audio element when track stops
+      if (event.track.kind === 'audio' && !event.participant?.local) {
+        const audioEl = document.getElementById(`audio-${event.participant?.session_id || 'remote'}`);
+        if (audioEl) audioEl.remove();
+      }
+    });
     
-    // Join room using Daily's public rooms (no API needed for basic calls)
     const roomUrl = `https://pwa-family.daily.co/${roomName}`;
-    await state.callObject.join({ url: roomUrl });
+    await state.callObject.join({ 
+      url: roomUrl,
+      audioSource: true,
+      videoSource: false,
+    });
     
   } catch (error) {
     console.error('Error joining Daily room:', error);
@@ -905,6 +945,9 @@ function endCallUI() {
     state.callObject.destroy();
     state.callObject = null;
   }
+  
+  // Remove any audio elements
+  document.querySelectorAll('audio[id^="audio-"]').forEach(el => el.remove());
   
   // Clear timer
   if (state.callTimer) {
