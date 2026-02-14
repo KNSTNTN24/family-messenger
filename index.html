@@ -1202,13 +1202,6 @@ document.addEventListener('keydown', (e) => {
 // =============================================
 // 🏁 START
 // =============================================
-  // Recreate client when tab becomes visible
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && state.user) {
-    console.log('Tab visible, recreating client...');
-    sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-  }
-});
 init();
 </script>
 </body>
