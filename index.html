@@ -72,6 +72,17 @@
       background: rgba(200,100,100,0.1); color: #C86464; padding: 10px 14px;
       border-radius: 10px; font-size: 13px; margin-bottom: 12px;
     }
+    .success-msg {
+      background: rgba(100,180,100,0.1); color: #5A9A5A; padding: 10px 14px;
+      border-radius: 10px; font-size: 13px; margin-bottom: 12px;
+    }
+    .auth-toggle {
+      margin-top: 20px; font-size: 14px; color: #A08B78;
+    }
+    .auth-toggle a {
+      color: #D4A574; text-decoration: none; font-weight: 600; cursor: pointer;
+    }
+    .auth-toggle a:hover { text-decoration: underline; }
 
     /* ===== PROFILE SETUP ===== */
     .emoji-grid {
@@ -363,16 +374,26 @@
 
 <div id="bg-pattern"></div>
 
-<!-- ===== LOGIN SCREEN ===== -->
-<div id="login-screen" class="screen">
+<!-- ===== AUTH SCREEN (Login/Register) ===== -->
+<div id="auth-screen" class="screen">
   <div class="login-card">
     <div class="login-logo">🏠</div>
     <div class="login-title">Наша Семья</div>
-    <div class="login-subtitle">Войдите в семейный мессенджер</div>
-    <div id="login-error" class="error-msg hidden"></div>
-    <input id="login-email" class="form-input" type="email" placeholder="Email" autocomplete="email">
-    <input id="login-password" class="form-input" type="password" placeholder="Пароль" autocomplete="current-password">
-    <button id="login-btn" class="btn-primary" onclick="handleLogin()">Войти</button>
+    <div class="login-subtitle" id="auth-subtitle">Войдите в семейный мессенджер</div>
+    
+    <div id="auth-error" class="error-msg hidden"></div>
+    <div id="auth-success" class="success-msg hidden"></div>
+    
+    <input id="auth-email" class="form-input" type="email" placeholder="Email" autocomplete="email">
+    <input id="auth-password" class="form-input" type="password" placeholder="Пароль" autocomplete="current-password">
+    <input id="auth-password-confirm" class="form-input hidden" type="password" placeholder="Подтвердите пароль" autocomplete="new-password">
+    
+    <button id="auth-btn" class="btn-primary" onclick="handleAuth()">Войти</button>
+    
+    <div class="auth-toggle">
+      <span id="auth-toggle-text">Нет аккаунта?</span>
+      <a id="auth-toggle-link" onclick="toggleAuthMode()">Зарегистрироваться</a>
+    </div>
   </div>
 </div>
 
@@ -434,18 +455,16 @@
 
 <script>
 // =============================================
-// ⚙️ CONFIGURATION — ЗАМЕНИТЕ НА СВОИ ДАННЫЕ
+// ⚙️ CONFIGURATION
 // =============================================
 const SUPABASE_URL = 'https://elrmeqivmjtzqkqfyigv.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVscm1lcWl2bWp0enFrcWZ5aWd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEwMDM3OTIsImV4cCI6MjA4NjU3OTc5Mn0.SZqK8n-yuNR6rsSdQuW2-whGdi9njgnknJpn84Kfa7Q';
-
-// 🔔 VAPID Public Key for Push Notifications
 const VAPID_PUBLIC_KEY = 'BLyAuZAxQJY4nSD0YRm3LB66TWuhTWmTlO4qV4AxIfy2AXSFnUMdZXFXZOly2U11hoLZbRL2HmAbnNq5BpRyN8E';
 
 // =============================================
 // 🗃️ STATE
 // =============================================
-let sb; // supabase client
+let sb;
 let state = {
   user: null,
   profile: null,
@@ -456,6 +475,8 @@ let state = {
   channel: null,
   pushSubscription: null,
 };
+
+let isRegisterMode = false;
 
 const EMOJIS = ['😊','😎','🤗','😄','🥰','🤓','👩','👨','👧','🧑','👵','👴','👶','🧔','💃','🕺'];
 const COLORS = ['#E8B4B8','#A7C7E7','#C3B1E1','#B5D8CC','#F0D9B5','#F4A6A0','#A8D8EA','#C5E1A5','#FFCC80','#CE93D8'];
@@ -477,7 +498,7 @@ async function init() {
     state.user = session.user;
     await loadProfile();
   } else {
-    showScreen('login');
+    showScreen('auth');
   }
 
   sb.auth.onAuthStateChange(async (event, session) => {
@@ -487,7 +508,7 @@ async function init() {
     } else if (event === 'SIGNED_OUT') {
       state.user = null;
       state.profile = null;
-      showScreen('login');
+      showScreen('auth');
     }
   });
 }
@@ -584,13 +605,46 @@ async function checkExistingPermission() {
 }
 
 // =============================================
-// 🔐 AUTH
+// 🔐 AUTH (Login & Register)
 // =============================================
-async function handleLogin() {
-  const email = document.getElementById('login-email').value.trim();
-  const password = document.getElementById('login-password').value;
-  const errorEl = document.getElementById('login-error');
-  const btn = document.getElementById('login-btn');
+function toggleAuthMode() {
+  isRegisterMode = !isRegisterMode;
+  
+  const subtitle = document.getElementById('auth-subtitle');
+  const btn = document.getElementById('auth-btn');
+  const toggleText = document.getElementById('auth-toggle-text');
+  const toggleLink = document.getElementById('auth-toggle-link');
+  const confirmInput = document.getElementById('auth-password-confirm');
+  const errorEl = document.getElementById('auth-error');
+  const successEl = document.getElementById('auth-success');
+  
+  errorEl.classList.add('hidden');
+  successEl.classList.add('hidden');
+  
+  if (isRegisterMode) {
+    subtitle.textContent = 'Создайте аккаунт для семьи';
+    btn.textContent = 'Зарегистрироваться';
+    toggleText.textContent = 'Уже есть аккаунт?';
+    toggleLink.textContent = 'Войти';
+    confirmInput.classList.remove('hidden');
+  } else {
+    subtitle.textContent = 'Войдите в семейный мессенджер';
+    btn.textContent = 'Войти';
+    toggleText.textContent = 'Нет аккаунта?';
+    toggleLink.textContent = 'Зарегистрироваться';
+    confirmInput.classList.add('hidden');
+  }
+}
+
+async function handleAuth() {
+  const email = document.getElementById('auth-email').value.trim();
+  const password = document.getElementById('auth-password').value;
+  const errorEl = document.getElementById('auth-error');
+  const successEl = document.getElementById('auth-success');
+  const btn = document.getElementById('auth-btn');
+
+  errorEl.classList.add('hidden');
+  successEl.classList.add('hidden');
 
   if (!email || !password) {
     errorEl.textContent = 'Введите email и пароль';
@@ -598,17 +652,68 @@ async function handleLogin() {
     return;
   }
 
-  btn.disabled = true;
-  btn.textContent = 'Входим...';
-  errorEl.classList.add('hidden');
+  if (isRegisterMode) {
+    // Registration
+    const confirmPassword = document.getElementById('auth-password-confirm').value;
+    
+    if (password !== confirmPassword) {
+      errorEl.textContent = 'Пароли не совпадают';
+      errorEl.classList.remove('hidden');
+      return;
+    }
+    
+    if (password.length < 6) {
+      errorEl.textContent = 'Пароль должен быть минимум 6 символов';
+      errorEl.classList.remove('hidden');
+      return;
+    }
 
-  const { error } = await sb.auth.signInWithPassword({ email, password });
+    btn.disabled = true;
+    btn.textContent = 'Регистрация...';
 
-  if (error) {
-    errorEl.textContent = 'Неверный email или пароль';
-    errorEl.classList.remove('hidden');
-    btn.disabled = false;
-    btn.textContent = 'Войти';
+    const { data, error } = await sb.auth.signUp({ 
+      email, 
+      password,
+    });
+
+    if (error) {
+      let errorMsg = 'Ошибка регистрации';
+      if (error.message.includes('already registered')) {
+        errorMsg = 'Этот email уже зарегистрирован';
+      } else if (error.message.includes('valid email')) {
+        errorMsg = 'Введите корректный email';
+      } else {
+        errorMsg = error.message;
+      }
+      errorEl.textContent = errorMsg;
+      errorEl.classList.remove('hidden');
+      btn.disabled = false;
+      btn.textContent = 'Зарегистрироваться';
+      return;
+    }
+
+    // If auto-confirm is disabled, show success message
+    if (data.user && !data.session) {
+      successEl.textContent = 'Проверьте email для подтверждения регистрации';
+      successEl.classList.remove('hidden');
+      btn.disabled = false;
+      btn.textContent = 'Зарегистрироваться';
+    }
+    // If session exists, user is auto-logged in (handled by onAuthStateChange)
+    
+  } else {
+    // Login
+    btn.disabled = true;
+    btn.textContent = 'Входим...';
+
+    const { error } = await sb.auth.signInWithPassword({ email, password });
+
+    if (error) {
+      errorEl.textContent = 'Неверный email или пароль';
+      errorEl.classList.remove('hidden');
+      btn.disabled = false;
+      btn.textContent = 'Войти';
+    }
   }
 }
 
@@ -826,7 +931,6 @@ function subscribeToMessages(convId) {
     });
 }
 
-// 🔄 REFRESH CHAT - кнопка обновления
 function refreshChat() {
   location.reload();
 }
@@ -910,7 +1014,7 @@ function closeLightbox() {
 // 🎨 UI RENDERING
 // =============================================
 function showScreen(name) {
-  document.getElementById('login-screen').classList.toggle('hidden', name !== 'login');
+  document.getElementById('auth-screen').classList.toggle('hidden', name !== 'auth');
   document.getElementById('setup-screen').classList.toggle('hidden', name !== 'setup');
   document.getElementById('messenger-screen').classList.toggle('hidden', name !== 'messenger');
 }
@@ -1175,8 +1279,9 @@ function getPlural(n) {
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
-    if (!document.getElementById('login-screen').classList.contains('hidden')) {
-      handleLogin();
+    const authScreen = document.getElementById('auth-screen');
+    if (!authScreen.classList.contains('hidden')) {
+      handleAuth();
     }
   }
 });
